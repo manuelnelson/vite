@@ -29,7 +29,8 @@ import {
   CLIENT_PUBLIC_PATH,
   DEP_VERSION_RE,
   VALID_ID_PREFIX,
-  NULL_BYTE_PLACEHOLDER
+  NULL_BYTE_PLACEHOLDER,
+  OPTIMIZED_PREFIX
 } from '../constants'
 import { ViteDevServer } from '..'
 import { checkPublicFile } from './asset'
@@ -85,6 +86,7 @@ function markExplicitImport(url: string) {
  */
 export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
   let server: ViteDevServer
+  let optimizedSource: string | undefined
 
   return {
     name: 'vite:import-analysis',
@@ -347,7 +349,10 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           if (url !== rawUrl) {
             // for optimized cjs deps, support named imports by rewriting named
             // imports to const assignments.
-            if (isOptimizedCjs(resolvedId, server)) {
+            if (url.startsWith(OPTIMIZED_PREFIX)) {
+              const depId = resolvedId.slice(OPTIMIZED_PREFIX.length)
+              const optimizedId = makeLegalIdentifier(depId)
+
               if (isLiteralDynamicId) {
                 // rewrite `import('package')` to expose module.exports
                 // note plugin-commonjs' behavior is exposing all properties on
@@ -355,11 +360,23 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                 str().overwrite(
                   dynamicIndex,
                   end + 1,
-                  `import('${url}').then(m => ({ ...m.default, default: m.default }))`
+                  `import('${optimizedSource}').then(m => m.${optimizedId})`
                 )
               } else {
+                optimizedSource =
+                  optimizedSource ||
+                  normalizePath(
+                    path.join(config.optimizeCacheDir!, '__dependencies.js')
+                  ) + `?v=${server._optimizeDepsMetadata!.hash}`
                 const exp = source.slice(expStart, expEnd)
-                const rewritten = transformCjsImport(exp, url, rawUrl, index)
+                const rewritten = transformOptimizedImport(
+                  exp,
+                  optimizedSource,
+                  optimizedId,
+                  index,
+                  depId,
+                  server._optimizeDepsMetadata!.optimized[depId]
+                )
                 if (rewritten) {
                   str().overwrite(expStart, expEnd, rewritten)
                 } else {
@@ -485,20 +502,6 @@ function isSupportedDynamicImport(url: string) {
   return true
 }
 
-function isOptimizedCjs(
-  id: string,
-  {
-    _optimizeDepsMetadata: optimizeDepsMetadata,
-    config: { optimizeCacheDir }
-  }: ViteDevServer
-): boolean {
-  if (optimizeDepsMetadata && optimizeCacheDir) {
-    const relative = path.relative(optimizeCacheDir, cleanUrl(id))
-    return relative in optimizeDepsMetadata.cjsEntries
-  }
-  return false
-}
-
 type ImportNameSpecifier = { importedName: string; localName: string }
 
 /**
@@ -514,16 +517,25 @@ type ImportNameSpecifier = { importedName: string; localName: string }
  *
  * Credits \@csr632 via #837
  */
-function transformCjsImport(
+function transformOptimizedImport(
   importExp: string,
-  url: string,
-  rawUrl: string,
-  importIndex: number
+  optimizedSource: string,
+  optimizedId: string,
+  importIndex: number,
+  id: string,
+  exports: string[]
 ): string | undefined {
   const node = (parseJS(importExp, {
     ecmaVersion: 2020,
     sourceType: 'module'
   }) as any).body[0] as Node
+
+  // If there is multiple import for same id in one file,
+  // importIndex will prevent the cjsModuleName to be duplicate
+  const moduleName = `__vite__${optimizedId}_${importIndex}`
+  const lines: string[] = [
+    `import { ${optimizedId} as ${moduleName} } from "${optimizedSource}";`
+  ]
 
   if (node.type === 'ImportDeclaration') {
     const importNames: ImportNameSpecifier[] = []
@@ -536,6 +548,9 @@ function transformCjsImport(
         const localName = spec.local.name
         importNames.push({ importedName, localName })
       } else if (spec.type === 'ImportDefaultSpecifier') {
+        if (exports.length && !exports.includes('default')) {
+          throw new Error(`Module "${id}" has no default export.`)
+        }
         importNames.push({
           importedName: 'default',
           localName: spec.local.name
@@ -544,20 +559,18 @@ function transformCjsImport(
         importNames.push({ importedName: '*', localName: spec.local.name })
       }
     }
-
-    // If there is multiple import for same id in one file,
-    // importIndex will prevent the cjsModuleName to be duplicate
-    const cjsModuleName = makeLegalIdentifier(
-      `__vite__cjsImport${importIndex}_${rawUrl}`
-    )
-    const lines: string[] = [`import ${cjsModuleName} from "${url}";`]
     importNames.forEach(({ importedName, localName }) => {
       if (importedName === '*' || importedName === 'default') {
-        lines.push(`const ${localName} = ${cjsModuleName};`)
+        lines.push(`const ${localName} = ${moduleName}.default`)
       } else {
-        lines.push(`const ${localName} = ${cjsModuleName}["${importedName}"];`)
+        lines.push(`const ${localName} = ${moduleName}["${importedName}"]`)
       }
     })
-    return lines.join('\n')
+  } else if (node.type === 'ExportAllDeclaration') {
+    const namedExports = exports.filter((e) => e !== 'default')
+    lines.push(`const { ${namedExports.join(', ')} } = ${moduleName}`)
+    lines.push(`export { ${namedExports.join(', ')} }`)
   }
+
+  return lines.join('\n')
 }
