@@ -10,7 +10,7 @@ export function useCount() {
 import './test.css'
 
 // test importing node built-ins
-// import fs from 'fs'
+import fs from 'fs'
 
 if (false) {
   fs.readFileSync()

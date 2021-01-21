@@ -7,6 +7,7 @@ import MagicString from 'magic-string'
 import { init, parse as parseImports, ImportSpecifier } from 'es-module-lexer'
 import { isCSSRequest, isDirectCSSRequest } from './css'
 import {
+  isBuiltin,
   cleanUrl,
   createDebugger,
   generateCodeFrame,
@@ -38,7 +39,6 @@ import { parse as parseJS } from 'acorn'
 import type { ImportDeclaration, Node } from 'estree'
 import { makeLegalIdentifier } from '@rollup/pluginutils'
 import { transformImportGlob } from '../importGlob'
-import isBuiltin from 'isbuiltin'
 
 const isDebug = !!process.env.DEBUG
 const debugRewrite = createDebugger('vite:rewrite')

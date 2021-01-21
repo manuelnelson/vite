@@ -4,6 +4,7 @@ import { Plugin } from '../plugin'
 import chalk from 'chalk'
 import { FS_PREFIX, OPTIMIZED_PREFIX, SUPPORTED_EXTS } from '../constants'
 import {
+  isBuiltin,
   bareImportRE,
   createDebugger,
   deepImportRE,
@@ -21,7 +22,6 @@ import { ResolvedConfig, ViteDevServer } from '..'
 import slash from 'slash'
 import { createFilter } from '@rollup/pluginutils'
 import { PartialResolvedId } from 'rollup'
-import isBuiltin from 'isbuiltin'
 import { isCSSRequest } from './css'
 import { resolve as _resolveExports } from 'resolve.exports'
 

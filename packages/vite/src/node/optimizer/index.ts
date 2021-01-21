@@ -231,10 +231,11 @@ export async function optimizeDeps(
   }
 
   for (const id in qualified) {
-    const entry = qualified[id]
-    const content = fs.readFileSync(entry, 'utf-8')
-    const [, exports] = parse(content)
-    data.optimized[id] = exports
+    data.optimized[id] = await parseExports(
+      qualified[id],
+      config,
+      aliasResolver
+    )
   }
 
   // construct a entry containing all the deps
@@ -251,7 +252,7 @@ export async function optimizeDeps(
     define: {
       'process.env.NODE_ENV': '"development"'
     },
-    plugins: [esbuildDepPlugin(config.dedupe, qualified)]
+    plugins: [esbuildDepPlugin(qualified, config)]
   })
 
   writeFile(dataPath, JSON.stringify(data, null, 2))
@@ -456,4 +457,44 @@ function buildTempEntry(
     }
   }
   return res
+}
+
+async function parseExports(
+  entry: string,
+  config: ResolvedConfig,
+  aliasResolver: PluginContainer
+) {
+  const content = fs.readFileSync(entry, 'utf-8')
+  const [imports, exports] = parse(content)
+
+  // check for export * from statements
+  for (const {
+    s: start,
+    e: end,
+    ss: expStart,
+    se: expEnd,
+    d: dynamicIndex
+  } of imports) {
+    if (dynamicIndex < 0) {
+      const exp = content.slice(expStart, expEnd)
+      if (exp.startsWith(`export * from`)) {
+        const id = content.slice(start, end)
+        const aliased = (await aliasResolver.resolveId(id))?.id || id
+        const filePath = tryNodeResolve(
+          aliased,
+          config.root,
+          config.isProduction
+        )?.id
+        if (filePath) {
+          const childExports = await parseExports(
+            filePath,
+            config,
+            aliasResolver
+          )
+          exports.push(...childExports)
+        }
+      }
+    }
+  }
+  return exports
 }

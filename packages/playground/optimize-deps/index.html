@@ -44,8 +44,8 @@
   import * as linked from 'optimize-deps-linked-include'
   const keys = Object.keys(linked)
   if (keys.length) {
-    document.querySelector(
-      '.include-star'
-    ).textContent = `[success] ${keys.join(', ')}`
+    document.querySelector('.import-star').textContent = `[success] ${keys.join(
+      ', '
+    )}`
   }
 </script>
