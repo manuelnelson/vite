@@ -441,22 +441,19 @@ function buildTempEntry(
   for (const id in qualified) {
     const validId = makeLegalIdentifier(id)
     const exports = idToExports[id]
-    const hasDefault = !exports.length || exports.includes('default')
-    const hasNamed = !(exports.length === 1 && exports[0] === 'default')
-    if (hasDefault) {
-      res += `import ${validId}_default from "${qualified[id]}"\n`
-    }
-    if (hasNamed) {
-      res += `import * as ${validId}_all from "${qualified[id]}"\n`
-    }
-    if (hasDefault && hasNamed) {
+    const entry = qualified[id]
+    if (!exports.length) {
+      // cjs or umd - provide rollup-style compat
+      // by exposing both the default and named properties
+      res += `import ${validId}_default from "${entry}"\n`
+      res += `import * as ${validId}_all from "${entry}"\n`
       res += `const ${validId} = { ...${validId}_all, default: ${validId}_default }\n`
-    } else if (hasDefault) {
-      res += `const ${validId} = { default: ${validId}_default }\n`
-    } else if (hasNamed) {
-      res += `const ${validId} = ${validId}_all\n`
+      res += `export { ${validId} }\n`
+    } else {
+      res += `export { ${exports
+        .map((e) => `${e} as ${validId}_${e}`)
+        .join(', ')} } from "${entry}"\n`
     }
-    res += `export { ${validId} }\n`
   }
   return res
 }
