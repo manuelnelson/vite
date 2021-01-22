@@ -205,6 +205,7 @@ function viteLegacyPlugin(options = {}) {
         ast: true,
         configFile: false,
         sourceMaps,
+        compact: false,
         inputSourceMap: sourceMaps && chunk.map,
         presets: [
           [
